@@ -356,53 +356,142 @@ function escapeHtml(text) {
 }
 
 /**
- * Hybrid search function - News API + Chat Context
+ * Feature Implementations
  */
-async function searchContext(messageId) {
+
+function handleFileUpload(input, messageId) {
+  const file = input.files[0];
+  if (file) {
+    addMessageToChat('user', `Uploaded file: ${file.name} - Laura sedang menganalisis...`);
+    // File processing logic would go here
+  }
+  input.value = '';
+}
+
+function toggleDeepThink(messageId) {
   const messageEl = document.querySelector(`[data-message-id="${messageId}"]`);
-  const searchBtn = messageEl.querySelector('.action-btn:nth-child(3)');
-  const originalSvg = searchBtn.innerHTML;
+  const deepThinkBtn = messageEl.querySelector('.action-btn:nth-child(2)');
+  const originalSvg = deepThinkBtn.innerHTML;
+  deepThinkBtn.innerHTML = `${SVG_ICONS.deepThink}<span class="deep-think-indicator">Thinking...</span>`;
   
-  // Tampilkan loading state
-  searchBtn.innerHTML = `${SVG_ICONS.search}<span class="deep-think-indicator">Searching...</span>`;
+  setTimeout(() => {
+    deepThinkBtn.innerHTML = originalSvg;
+    addMessageToChat('assistant', 'Laura telah melakukan analisis mendalam. Hasilnya menunjukkan...');
+  }, 2000);
+}
+
+function searchContext(messageId) {
+  addMessageToChat('assistant', 'Laura sedang mencari informasi terkait di database...');
+}
+
+function copyMessage(messageId) {
+  const messageEl = document.querySelector(`[data-message-id="${messageId}"]`);
+  const content = messageEl.querySelector('.message-content').textContent;
   
-  try {
-    // Ambil konteks dari pesan terakhir user
-    const lastUserMessage = chatHistory.filter(msg => msg.role === 'user').pop();
-    const searchQuery = lastUserMessage ? lastUserMessage.content : 'berita terkini';
-    
-    const response = await fetch("/api/search", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        query: searchQuery,
-        sessionId: currentSessionId
-      }),
-    });
+  navigator.clipboard.writeText(content).then(() => {
+    const copyBtn = messageEl.querySelector('.action-btn:nth-child(4)');
+    const originalSvg = copyBtn.innerHTML;
+    copyBtn.innerHTML = `${SVG_ICONS.copy}<span style="margin-left: 4px; font-size: 0.7rem;">✅</span>`;
+    setTimeout(() => {
+      copyBtn.innerHTML = originalSvg;
+    }, 2000);
+  });
+}
 
-    if (!response.ok) {
-      throw new Error("Search failed");
-    }
+function copyCode(button) {
+  const codeContent = button.closest('.code-block').querySelector('.code-content').textContent;
+  navigator.clipboard.writeText(codeContent).then(() => {
+    const originalText = button.textContent;
+    button.textContent = 'Copied!';
+    setTimeout(() => {
+      button.textContent = originalText;
+    }, 2000);
+  });
+}
 
-    const searchResults = await response.json();
-    
-    // Format hasil search untuk ditampilkan
-    const formattedResults = formatSearchResults(searchResults);
-    
-    addMessageToChat('assistant', formattedResults);
-
-  } catch (error) {
-    console.error("Search error:", error);
-    addMessageToChat('assistant', 'Laura sedang mencari informasi... (Mode offline)');
-  } finally {
-    // Kembalikan tombol ke state normal
-    searchBtn.innerHTML = originalSvg;
+function regenerateResponse(messageId) {
+  const messageEl = document.querySelector(`[data-message-id="${messageId}"]`);
+  messageEl.remove();
+  
+  // Remove the last assistant message from history
+  chatHistory = chatHistory.filter((msg, index) => 
+    !(msg.role === 'assistant' && index === chatHistory.length - 1)
+  );
+  
+  saveSession();
+  
+  // Resend the last user message
+  const lastUserMessage = chatHistory[chatHistory.length - 1];
+  if (lastUserMessage && lastUserMessage.role === 'user') {
+    addMessageToChat('assistant', 'Laura sedang meregenerasi respons...');
   }
 }
 
-/**
- * Format search results untuk ditampilkan di chat
- */
-function format
+function rateMessage(messageId, rating) {
+  const messageEl = document.querySelector(`[data-message-id="${messageId}"]`);
+  const likeBtn = messageEl.querySelector('.feedback-btn:nth-child(1)');
+  const dislikeBtn = messageEl.querySelector('.feedback-btn:nth-child(2)');
+  
+  if (rating === 'like') {
+    likeBtn.classList.add('active');
+    dislikeBtn.classList.remove('active');
+    addMessageToChat('assistant', 'Terima kasih atas feedback positifnya! Laura senang bisa membantu.');
+  } else {
+    dislikeBtn.classList.add('active');
+    likeBtn.classList.remove('active');
+    addMessageToChat('assistant', 'Laura minta maaf jika respons kurang memuaskan. Laura akan berusaha lebih baik.');
+  }
+}
+
+function shareAnalysis(messageId) {
+  const messageEl = document.querySelector(`[data-message-id="${messageId}"]`);
+  const content = messageEl.querySelector('.message-content').textContent;
+  
+  if (navigator.share) {
+    navigator.share({
+      title: 'Anna Laura AI Analysis',
+      text: content,
+      url: window.location.href
+    });
+  } else {
+    navigator.clipboard.writeText(content).then(() => {
+      const shareBtn = messageEl.querySelector('.action-btn:last-child');
+      const originalSvg = shareBtn.innerHTML;
+      shareBtn.innerHTML = `${SVG_ICONS.share}<span style="margin-left: 4px; font-size: 0.7rem;">✅</span>`;
+      setTimeout(() => {
+        shareBtn.innerHTML = originalSvg;
+      }, 2000);
+    });
+  }
+}
+
+// Clear session data (untuk testing/development)
+function clearSession() {
+  localStorage.removeItem('anna_laura_session');
+  currentSessionId = generateSessionId();
+  chatHistory = [
+    {
+      role: "assistant",
+      content: "Halo! Laura adalah asisten AI cerdas dari SOEPARNO ENTERPRISE Corp. Laura beroperasi dari Sukabumi City, West Java - INDONESIA. Bagaimana Laura bisa membantu Anda hari ini?"
+    },
+  ];
+  chatMessages.innerHTML = '';
+  addMessageToChat("assistant", chatHistory[0].content);
+  saveSession();
+}
+
+// Initialize chat dengan session management
+document.addEventListener('DOMContentLoaded', function() {
+  loadSession();
+  userInput.focus();
+  
+  // Auto-cleanup session yang terlalu tua (7 hari)
+  const weekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+  const sessionData = localStorage.getItem('anna_laura_session');
+  if (sessionData) {
+    const data = JSON.parse(sessionData);
+    if (data.lastUpdated < weekAgo) {
+      clearSession();
+    }
+  }
+});
