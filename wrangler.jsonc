@@ -1,7 +1,4 @@
-/**
- * For more details on how to configure Wrangler, refer to:
- * https://developers.cloudflare.com/workers/wrangler/configuration/
- */ {
+{
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "anna-laura-basic",
   "main": "src/index.ts",
@@ -17,5 +14,11 @@
   "ai": {
     "binding": "AI"
   },
+  "r2_buckets": [
+    {
+      "binding": "ANNA_LAURA_BASIC",
+      "bucket_name": "annalaurabasic"
+    }
+  ],
   "upload_source_maps": true
 }
