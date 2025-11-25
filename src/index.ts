@@ -62,6 +62,13 @@ export default {
       return new Response("Method not allowed", { status: 405 });
     }
 
+    if (url.pathname === "/api/search") {
+      if (request.method === "POST") {
+        return handleSearchRequest(request, env);
+      }
+      return new Response("Method not allowed", { status: 405 });
+    }
+
     return new Response("Not found", { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
@@ -127,6 +134,110 @@ async function saveChatSession(sessionId: string, sessionData: ChatSession, env:
     );
   } catch (error) {
     console.error("Error saving session:", error);
+  }
+}
+
+/**
+ * Handle hybrid search request
+ */
+async function handleSearchRequest(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  try {
+    const { query, sessionId } = await request.json() as {
+      query: string;
+      sessionId?: string;
+    };
+
+    if (!query || query.trim().length < 2) {
+      return new Response(
+        JSON.stringify({ error: "Query terlalu pendek" }),
+        { status: 400 }
+      );
+    }
+
+    // Hybrid search: News API + Context dari chat history
+    const [newsResults, contextResults] = await Promise.all([
+      searchNewsAPI(query, env),
+      searchChatContext(query, sessionId, env)
+    ]);
+
+    const hybridResults = {
+      news: newsResults,
+      context: contextResults,
+      query: query,
+      timestamp: new Date().toISOString()
+    };
+
+    return new Response(JSON.stringify(hybridResults), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  } catch (error) {
+    console.error("Search error:", error);
+    return new Response(
+      JSON.stringify({ error: "Gagal melakukan pencarian" }),
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * Search news from NewsAPI
+ */
+async function searchNewsAPI(query: string, env: Env): Promise<any> {
+  try {
+    const newsApiKey = env.NEWS_API_KEY;
+    const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(query)}&language=id&sortBy=publishedAt&pageSize=5&apiKey=${newsApiKey}`;
+    
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (data.status === "ok") {
+      return data.articles.map((article: any) => ({
+        title: article.title,
+        description: article.description,
+        url: article.url,
+        source: article.source.name,
+        publishedAt: article.publishedAt,
+        image: article.urlToImage
+      }));
+    }
+    
+    return [];
+  } catch (error) {
+    console.error("News API error:", error);
+    return [];
+  }
+}
+
+/**
+ * Search relevant context dari chat history
+ */
+async function searchChatContext(query: string, sessionId: string | undefined, env: Env): Promise<any> {
+  if (!sessionId) return [];
+
+  try {
+    const sessionData = await loadChatSession(sessionId, env);
+    if (!sessionData) return [];
+
+    // Simple keyword matching dalam chat history
+    const relevantMessages = sessionData.chatHistory.filter(msg => 
+      msg.content.toLowerCase().includes(query.toLowerCase()) &&
+      msg.role === "assistant"
+    ).slice(-3); // Ambil 3 pesan terakhir yang relevan
+
+    return relevantMessages.map(msg => ({
+      type: "chat_context",
+      content: msg.content.substring(0, 200) + "...", // Potong untuk preview
+      timestamp: new Date().toLocaleString("id-ID"),
+      relevance: "high"
+    }));
+
+  } catch (error) {
+    console.error("Context search error:", error);
+    return [];
   }
 }
 
