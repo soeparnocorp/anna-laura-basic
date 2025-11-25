@@ -3,17 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>secAI Security</title>
+    <title>Anna Laura AI Assistant</title>
     <style>
       :root {
-        --primary-color: #00ff88;
-        --primary-hover: #00cc6d;
+        --primary-color: #ffffff;
+        --primary-hover: #e0e0e0;
         --light-bg: #0a0a0a;
         --border-color: #333333;
         --text-color: #ffffff;
         --text-light: #888888;
-        --user-msg-bg: #003322;
-        --assistant-msg-bg: #1a1a1a;
+        --user-msg-bg: #1a1a1a;
+        --assistant-msg-bg: #2a2a2a;
+        --code-bg: #1a1a1a;
+        --action-hover: rgba(255, 255, 255, 0.1);
       }
 
       * {
@@ -81,6 +83,98 @@
         align-self: flex-start;
       }
 
+      .message-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+        font-size: 0.85rem;
+        color: var(--text-light);
+      }
+
+      .message-role {
+        font-weight: bold;
+        color: var(--primary-color);
+      }
+
+      .message-time {
+        font-size: 0.75rem;
+        opacity: 0.7;
+      }
+
+      .message-content {
+        line-height: 1.5;
+      }
+
+      .message-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 1rem;
+        padding-top: 0.75rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .action-buttons {
+        display: flex;
+        gap: 0.5rem;
+      }
+
+      .action-btn {
+        background: transparent;
+        border: 1px solid var(--border-color);
+        color: var(--text-light);
+        padding: 0.4rem;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 0.9rem;
+      }
+
+      .action-btn:hover {
+        border-color: var(--primary-color);
+        color: var(--primary-color);
+        background: var(--action-hover);
+      }
+
+      .feedback-buttons {
+        display: flex;
+        gap: 0.25rem;
+      }
+
+      .feedback-btn {
+        background: transparent;
+        border: none;
+        color: var(--text-light);
+        cursor: pointer;
+        padding: 0.25rem;
+        border-radius: 3px;
+        transition: all 0.2s;
+      }
+
+      .feedback-btn:hover {
+        color: var(--primary-color);
+      }
+
+      .feedback-btn.active {
+        color: var(--primary-color);
+      }
+
+      .file-upload {
+        display: none;
+      }
+
+      .upload-label {
+        cursor: pointer;
+      }
+
+      .deep-think-indicator {
+        display: inline-block;
+        margin-left: 0.5rem;
+        color: var(--primary-color);
+        font-size: 0.8rem;
+      }
+
       .message-input {
         display: flex;
         padding: 0.75rem;
@@ -132,6 +226,50 @@
         display: block;
       }
 
+      .code-block {
+        background: var(--code-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        margin: 0.5rem 0;
+        overflow: hidden;
+      }
+
+      .code-header {
+        background: #2a2a2a;
+        padding: 0.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .code-language {
+        color: var(--primary-color);
+        font-size: 0.8rem;
+      }
+
+      .copy-code-btn {
+        background: transparent;
+        border: 1px solid var(--primary-color);
+        color: var(--primary-color);
+        padding: 0.2rem 0.5rem;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 0.7rem;
+        transition: all 0.2s;
+      }
+
+      .copy-code-btn:hover {
+        background: var(--primary-color);
+        color: #000000;
+      }
+
+      .code-content {
+        padding: 1rem;
+        overflow-x: auto;
+        font-family: 'Courier New', monospace;
+        color: #ffffff;
+      }
+
       footer {
         margin-top: 1rem;
         text-align: center;
@@ -142,38 +280,63 @@
   </head>
   <body>
     <header>
-      <h1>secAI Security</h1>
-      <p>Advanced AI-Powered Threat Detection</p>
+      <h1>Anna Laura AI Assistant</h1>
+      <p>Powered by SOEPARNO ENTERPRISE Corp. - Divisi SoeparnoTect</p>
     </header>
 
     <div class="chat-container">
       <div id="chat-messages" class="chat-messages">
         <div class="message assistant-message">
-          <p>
-            Hello! I'm secAI Security Assistant. I can help analyze security threats, detect vulnerabilities, and provide cybersecurity guidance. How can I assist with your security needs today?
-          </p>
+          <div class="message-header">
+            <span class="message-role">Anna Laura AI</span>
+            <span class="message-time" id="current-time"></span>
+          </div>
+          <div class="message-content">
+            <p>Halo! Laura adalah asisten AI cerdas dari SOEPARNO ENTERPRISE Corp. Laura beroperasi dari Sukabumi City, West Java - INDONESIA. Bagaimana Laura bisa membantu Anda hari ini?</p>
+          </div>
+          <div class="message-actions">
+            <div class="action-buttons">
+              <label class="upload-label action-btn" title="Upload file">
+                <input type="file" class="file-upload" accept=".txt,.log,.json,.pdf,.jpg,.png">
+                📎
+              </label>
+              <button class="action-btn" title="Deep Think">🧠</button>
+              <button class="action-btn" title="Search">🔍</button>
+              <button class="action-btn" title="Copy">📋</button>
+              <button class="action-btn" title="Regenerate">🔄</button>
+            </div>
+            <div class="feedback-buttons">
+              <button class="feedback-btn" title="Like">👍</button>
+              <button class="feedback-btn" title="Dislike">👎</button>
+              <button class="action-btn" title="Share">📤</button>
+            </div>
+          </div>
         </div>
       </div>
 
       <div class="typing-indicator" id="typing-indicator">
-        secAI is analyzing...
+        Anna Laura AI sedang berpikir...
       </div>
 
       <div class="message-input">
         <textarea
           id="user-input"
-          placeholder="Describe your security concern or ask about threat detection..."
+          placeholder="Tanyakan apapun kepada Laura..."
           rows="1"
           autofocus
         ></textarea>
-        <button id="send-button">Analyze</button>
+        <button id="send-button">Kirim</button>
       </div>
     </div>
 
     <footer>
-      <p>secAI Security System &copy; 2025</p>
+      <p>SOEPARNO ENTERPRISE Corp. - Divisi SoeparnoTect &copy; 2025 - Sukabumi City, West Java - INDONESIA</p>
     </footer>
 
+    <script>
+      // Update current time
+      document.getElementById('current-time').textContent = new Date().toLocaleTimeString();
+    </script>
     <script src="chat.js"></script>
   </body>
 </html>
