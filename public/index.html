@@ -3,17 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LLM Chat App</title>
+    <title>secAI Security</title>
     <style>
       :root {
-        --primary-color: #f6821f;
-        --primary-hover: #e67e22;
-        --light-bg: #f9fafb;
-        --border-color: #e5e7eb;
-        --text-color: #1f2937;
-        --text-light: #6b7280;
-        --user-msg-bg: #fff2e6;
-        --assistant-msg-bg: #f3f4f6;
+        --primary-color: #00ff88;
+        --primary-hover: #00cc6d;
+        --light-bg: #0a0a0a;
+        --border-color: #333333;
+        --text-color: #ffffff;
+        --text-light: #888888;
+        --user-msg-bg: #003322;
+        --assistant-msg-bg: #1a1a1a;
       }
 
       * {
@@ -31,6 +31,7 @@
         max-width: 800px;
         margin: 0 auto;
         padding: 1rem;
+        background-color: #000000;
       }
 
       header {
@@ -84,7 +85,7 @@
         display: flex;
         padding: 0.75rem;
         border-top: 1px solid var(--border-color);
-        background-color: white;
+        background-color: #111111;
       }
 
       #user-input {
@@ -95,17 +96,20 @@
         font-family: inherit;
         resize: none;
         min-height: 44px;
+        background-color: #1a1a1a;
+        color: var(--text-color);
       }
 
       #send-button {
         margin-left: 0.5rem;
         padding: 0 1rem;
         background-color: var(--primary-color);
-        color: white;
+        color: #000000;
         border: none;
         border-radius: 4px;
         cursor: pointer;
         transition: background-color 0.2s;
+        font-weight: bold;
       }
 
       #send-button:hover {
@@ -138,40 +142,38 @@
   </head>
   <body>
     <header>
-      <h1>Cloudflare AI Chat</h1>
-      <p>Powered by Cloudflare Workers AI</p>
+      <h1>secAI Security</h1>
+      <p>Advanced AI-Powered Threat Detection</p>
     </header>
 
     <div class="chat-container">
       <div id="chat-messages" class="chat-messages">
         <div class="message assistant-message">
           <p>
-            Hello! I'm an LLM chat app powered by Cloudflare Workers AI. How can
-            I help you today?
+            Hello! I'm secAI Security Assistant. I can help analyze security threats, detect vulnerabilities, and provide cybersecurity guidance. How can I assist with your security needs today?
           </p>
         </div>
       </div>
 
       <div class="typing-indicator" id="typing-indicator">
-        AI is thinking...
+        secAI is analyzing...
       </div>
 
       <div class="message-input">
         <textarea
           id="user-input"
-          placeholder="Type your message here..."
+          placeholder="Describe your security concern or ask about threat detection..."
           rows="1"
           autofocus
         ></textarea>
-        <button id="send-button">Send</button>
+        <button id="send-button">Analyze</button>
       </div>
     </div>
 
     <footer>
-      <p>Cloudflare Workers AI Chat Template &copy; 2025</p>
+      <p>secAI Security System &copy; 2025</p>
     </footer>
 
-    <!-- Chat app script -->
     <script src="chat.js"></script>
   </body>
 </html>
