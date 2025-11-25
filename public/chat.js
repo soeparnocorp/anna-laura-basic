@@ -11,7 +11,7 @@ const userInput = document.getElementById("user-input");
 const sendButton = document.getElementById("send-button");
 const typingIndicator = document.getElementById("typing-indicator");
 
-// Chat state
+// Chat state dengan session management
 let chatHistory = [
   {
     role: "assistant",
@@ -19,6 +19,42 @@ let chatHistory = [
   },
 ];
 let isProcessing = false;
+let currentSessionId = null;
+
+// Load session dari localStorage jika ada
+function loadSession() {
+  const savedSession = localStorage.getItem('anna_laura_session');
+  if (savedSession) {
+    const sessionData = JSON.parse(savedSession);
+    currentSessionId = sessionData.sessionId;
+    chatHistory = sessionData.chatHistory || chatHistory;
+    
+    // Re-render chat history
+    chatMessages.innerHTML = '';
+    chatHistory.forEach(msg => {
+      addMessageToChat(msg.role, msg.content);
+    });
+  } else {
+    // Generate new session ID
+    currentSessionId = generateSessionId();
+    saveSession();
+  }
+}
+
+// Save session ke localStorage
+function saveSession() {
+  const sessionData = {
+    sessionId: currentSessionId,
+    chatHistory: chatHistory,
+    lastUpdated: Date.now()
+  };
+  localStorage.setItem('anna_laura_session', JSON.stringify(sessionData));
+}
+
+// Generate session ID
+function generateSessionId() {
+  return `sess_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
 
 // Auto-resize textarea as user types
 userInput.addEventListener("input", function () {
@@ -57,6 +93,7 @@ async function sendMessage() {
   typingIndicator.classList.add("visible");
 
   chatHistory.push({ role: "user", content: message });
+  saveSession(); // Save setelah user message
 
   try {
     const assistantMessageEl = document.createElement("div");
@@ -102,16 +139,19 @@ async function sendMessage() {
       },
       body: JSON.stringify({
         messages: chatHistory,
+        sessionId: currentSessionId
       }),
     });
 
     if (!response.ok) {
-      throw new Error("Failed to get response");
+      const errorData = await response.json();
+      throw new Error(errorData.error || "Failed to get response");
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let responseText = "";
+    let receivedSessionId = currentSessionId;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -124,8 +164,19 @@ async function sendMessage() {
       const lines = chunk.split("\n");
       
       for (const line of lines) {
+        if (line.trim() === '') continue;
+        
         try {
-          const jsonData = JSON.parse(line);
+          const jsonData = JSON.parse(line.replace('data: ', ''));
+          
+          if (jsonData.sessionId) {
+            receivedSessionId = jsonData.sessionId;
+            if (receivedSessionId !== currentSessionId) {
+              currentSessionId = receivedSessionId;
+              saveSession();
+            }
+          }
+          
           if (jsonData.response) {
             responseText += jsonData.response;
             
@@ -135,6 +186,10 @@ async function sendMessage() {
             
             chatMessages.scrollTop = chatMessages.scrollHeight;
           }
+          
+          if (jsonData.error) {
+            throw new Error(jsonData.error);
+          }
         } catch (e) {
           // Skip JSON parse errors for streaming
         }
@@ -142,11 +197,12 @@ async function sendMessage() {
     }
 
     chatHistory.push({ role: "assistant", content: responseText });
+    saveSession(); // Save setelah assistant response
   } catch (error) {
     console.error("Error:", error);
     addMessageToChat(
       "assistant",
-      "Maaf, Laura mengalami gangguan. Silakan coba lagi."
+      error.message || "Maaf, Laura mengalami gangguan. Silakan coba lagi."
     );
   } finally {
     typingIndicator.classList.remove("visible");
@@ -305,6 +361,8 @@ function regenerateResponse(messageId) {
     !(msg.role === 'assistant' && index === chatHistory.length - 1)
   );
   
+  saveSession();
+  
   // Resend the last user message
   const lastUserMessage = chatHistory[chatHistory.length - 1];
   if (lastUserMessage && lastUserMessage.role === 'user') {
@@ -350,7 +408,33 @@ function shareAnalysis(messageId) {
   }
 }
 
-// Initialize chat
+// Clear session data (untuk testing/development)
+function clearSession() {
+  localStorage.removeItem('anna_laura_session');
+  currentSessionId = generateSessionId();
+  chatHistory = [
+    {
+      role: "assistant",
+      content: "Halo! Laura adalah asisten AI cerdas dari SOEPARNO ENTERPRISE Corp. Laura beroperasi dari Sukabumi City, West Java - INDONESIA. Bagaimana Laura bisa membantu Anda hari ini?"
+    },
+  ];
+  chatMessages.innerHTML = '';
+  addMessageToChat("assistant", chatHistory[0].content);
+  saveSession();
+}
+
+// Initialize chat dengan session management
 document.addEventListener('DOMContentLoaded', function() {
+  loadSession();
   userInput.focus();
+  
+  // Auto-cleanup session yang terlalu tua (7 hari)
+  const weekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+  const sessionData = localStorage.getItem('anna_laura_session');
+  if (sessionData) {
+    const data = JSON.parse(sessionData);
+    if (data.lastUpdated < weekAgo) {
+      clearSession();
+    }
+  }
 });
