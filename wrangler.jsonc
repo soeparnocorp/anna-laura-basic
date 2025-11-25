@@ -20,5 +20,8 @@
       "bucket_name": "annalaurabasic"
     }
   ],
+  "vars": {
+    "NEWS_API_KEY": "897cd23ebcea456b8cf979ec9ee0a99e"
+  },
   "upload_source_maps": true
 }
