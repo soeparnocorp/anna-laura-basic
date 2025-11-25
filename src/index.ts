@@ -6,10 +6,9 @@
  * 
  * @license MIT
  */
-import { Env, ChatMessage } from "./types";
+import { Env, ChatMessage, ChatSession } from "./types";
 
 // Model ID for Workers AI model
-// https://developers.cloudflare.com/workers-ai/models/
 const MODEL_ID = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 // System prompt untuk Anna Laura AI persona
@@ -38,10 +37,13 @@ FORMAT RESPONS:
 
 Laura siap membantu dengan berbagai topik: teknologi, programming, bisnis, edukasi, dan umum.`;
 
+// Content filter untuk spam dan explicit content
+const SPAM_PATTERNS = [
+  /porn/i, /xxx/i, /adult/i, /sex/i, /nude/i, /fuck/i, /shit/i,
+  /http(s)?:\/\//, /www\./i, /\.com/i, /bit\.ly/i, /spam/i
+];
+
 export default {
-  /**
-   * Main request handler for the Worker
-   */
   async fetch(
     request: Request,
     env: Env,
@@ -49,49 +51,141 @@ export default {
   ): Promise<Response> {
     const url = new URL(request.url);
 
-    // Handle static assets (frontend)
     if (url.pathname === "/" || !url.pathname.startsWith("/api/")) {
       return env.ASSETS.fetch(request);
     }
 
-    // API Routes
     if (url.pathname === "/api/chat") {
-      // Handle POST requests for chat
       if (request.method === "POST") {
         return handleChatRequest(request, env);
       }
-
-      // Method not allowed for other request types
       return new Response("Method not allowed", { status: 405 });
     }
 
-    // Handle 404 for unmatched routes
     return new Response("Not found", { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
 
 /**
- * Handles chat API requests untuk Anna Laura AI
+ * Content filter untuk mencegah spam dan explicit content
  */
+function contentFilter(message: string): boolean {
+  return !SPAM_PATTERNS.some(pattern => pattern.test(message));
+}
+
+/**
+ * Generate session ID untuk anonymous user
+ */
+function generateSessionId(): string {
+  return `sess_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+/**
+ * Rate limiting check
+ */
+function checkRateLimit(sessionData: any): boolean {
+  const now = Date.now();
+  const oneMinuteAgo = now - 60000;
+  
+  // Max 10 messages per minute
+  if (sessionData.lastActivity > oneMinuteAgo && sessionData.messageCount > 10) {
+    return false;
+  }
+  
+  // Max 1000 messages per session (1MB limit)
+  if (sessionData.messageCount > 1000) {
+    return false;
+  }
+  
+  return true;
+}
+
+/**
+ * Load chat session dari R2
+ */
+async function loadChatSession(sessionId: string, env: Env): Promise<ChatSession | null> {
+  try {
+    const sessionData = await env.ANNA_LAURA_BASIC.get(sessionId);
+    if (sessionData) {
+      return JSON.parse(await sessionData.text());
+    }
+  } catch (error) {
+    console.error("Error loading session:", error);
+  }
+  return null;
+}
+
+/**
+ * Save chat session ke R2
+ */
+async function saveChatSession(sessionId: string, sessionData: ChatSession, env: Env): Promise<void> {
+  try {
+    await env.ANNA_LAURA_BASIC.put(
+      sessionId,
+      JSON.stringify(sessionData),
+      { expirationTtl: 86400 } // 24 jam
+    );
+  } catch (error) {
+    console.error("Error saving session:", error);
+  }
+}
+
 async function handleChatRequest(
   request: Request,
   env: Env,
 ): Promise<Response> {
   try {
-    // Parse JSON request body
-    const { messages = [] } = (await request.json()) as {
+    const { messages = [], sessionId: clientSessionId } = await request.json() as {
       messages: ChatMessage[];
+      sessionId?: string;
     };
 
-    // Add system prompt if not present
-    if (!messages.some((msg) => msg.role === "system")) {
-      messages.unshift({ role: "system", content: SYSTEM_PROMPT });
+    // Generate atau gunakan session ID
+    const sessionId = clientSessionId || generateSessionId();
+    
+    // Load existing session atau create baru
+    let sessionData = await loadChatSession(sessionId, env) || {
+      chatHistory: [],
+      sessionStart: Date.now(),
+      messageCount: 0,
+      lastActivity: Date.now(),
+      sessionId: sessionId
+    };
+
+    // Check rate limiting
+    if (!checkRateLimit(sessionData)) {
+      return new Response(
+        JSON.stringify({ 
+          error: "Rate limit exceeded. Please try again later.",
+          sessionId 
+        }),
+        { status: 429, headers: { 'Content-Type': 'application/json' } }
+      );
     }
 
-    // Process messages to ensure Laura's persona
-    const processedMessages = messages.map(msg => {
+    // Filter spam content
+    const lastUserMessage = messages[messages.length - 1];
+    if (lastUserMessage.role === 'user' && !contentFilter(lastUserMessage.content)) {
+      return new Response(
+        JSON.stringify({ 
+          error: "Content not allowed.",
+          sessionId 
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Combine session history dengan new messages
+    const allMessages = [...sessionData.chatHistory, ...messages];
+    
+    // Add system prompt jika belum ada
+    if (!allMessages.some((msg) => msg.role === "system")) {
+      allMessages.unshift({ role: "system", content: SYSTEM_PROMPT });
+    }
+
+    // Process messages untuk Laura persona
+    const processedMessages = allMessages.map(msg => {
       if (msg.role === "assistant") {
-        // Ensure assistant responses use Laura persona
         return {
           ...msg,
           content: msg.content.replace(/saya|aku/gi, 'Laura')
@@ -109,8 +203,59 @@ async function handleChatRequest(
       }
     );
 
-    // Return streaming response
-    return new Response(response as ReadableStream, {
+    // Update session data
+    sessionData.chatHistory = allMessages.slice(-50); // Keep last 50 messages
+    sessionData.messageCount += 1;
+    sessionData.lastActivity = Date.now();
+
+    // Save session ke R2
+    await saveChatSession(sessionId, sessionData, env);
+
+    // Return streaming response dengan session ID
+    const originalStream = response as ReadableStream;
+    const transformedStream = new ReadableStream({
+      async start(controller) {
+        const reader = originalStream.getReader();
+        const encoder = new TextEncoder();
+        
+        // Send session ID first
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ sessionId })}\n\n`));
+        
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = new TextDecoder().decode(value);
+            const lines = chunk.split('\n');
+            
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  if (data.response) {
+                    const lauraResponse = data.response.replace(/saya|aku/gi, 'Laura');
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ response: lauraResponse })}\n\n`));
+                  }
+                } catch (e) {
+                  // Skip invalid JSON
+                }
+              }
+            }
+          }
+          controller.close();
+        } catch (error) {
+          console.error('Stream error:', error);
+          const errorMsg = JSON.stringify({
+            response: "Laura minta maaf, terjadi gangguan pada sistem."
+          });
+          controller.enqueue(encoder.encode(`data: ${errorMsg}\n\n`));
+          controller.close();
+        }
+      }
+    });
+
+    return new Response(transformedStream, {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
@@ -121,80 +266,14 @@ async function handleChatRequest(
   } catch (error) {
     console.error("Error processing chat request:", error);
     
-    // Error response in Laura's persona
-    const errorMessage = JSON.stringify({
-      response: "Maaf, Laura mengalami gangguan teknis. Silakan coba lagi dalam beberapa saat."
-    });
-    
-    return new Response(`data: ${errorMessage}\n\n`, {
-      status: 500,
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-      },
-    });
-  }
-}
-
-/**
- * Utility function to stream responses
- */
-function createStreamingResponse(messages: ChatMessage[], env: Env): Response {
-  const stream = new ReadableStream({
-    async start(controller) {
-      try {
-        const response = await env.AI.run(
-          MODEL_ID,
-          {
-            messages,
-            max_tokens: 2048,
-            stream: true
-          }
-        );
-
-        const reader = (response as ReadableStream).getReader();
-        
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          // Process and send each chunk
-          const chunk = new TextDecoder().decode(value);
-          const lines = chunk.split('\n');
-          
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.response) {
-                  // Ensure Laura persona in streaming
-                  const lauraResponse = data.response.replace(/saya|aku/gi, 'Laura');
-                  controller.enqueue(`data: ${JSON.stringify({ response: lauraResponse })}\n\n`);
-                }
-              } catch (e) {
-                // Skip invalid JSON in streaming
-              }
-            }
-          }
-        }
-        
-        controller.close();
-      } catch (error) {
-        console.error('Stream error:', error);
-        const errorMsg = JSON.stringify({
-          response: "Laura minta maaf, terjadi gangguan pada sistem."
-        });
-        controller.enqueue(`data: ${errorMsg}\n\n`);
-        controller.close();
+    return new Response(
+      JSON.stringify({ 
+        error: "Maaf, Laura mengalami gangguan teknis. Silakan coba lagi dalam beberapa saat."
+      }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
       }
-    }
-  });
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-    },
-  });
+    );
+  }
 }
