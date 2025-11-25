@@ -1,7 +1,7 @@
 /**
- * LLM Chat App Frontend
+ * secAI Security Frontend
  *
- * Handles the chat UI interactions and communication with the backend API.
+ * Handles the security chat UI interactions and communication with the backend API.
  */
 
 // DOM elements
@@ -14,8 +14,7 @@ const typingIndicator = document.getElementById("typing-indicator");
 let chatHistory = [
   {
     role: "assistant",
-    content:
-      "Hello! I'm an LLM chat app powered by Cloudflare Workers AI. How can I help you today?",
+    content: "Hello! I'm secAI Security Assistant. I can help analyze security threats, detect vulnerabilities, and provide cybersecurity guidance. How can I assist with your security needs today?",
   },
 ];
 let isProcessing = false;
@@ -38,43 +37,34 @@ userInput.addEventListener("keydown", function (e) {
 sendButton.addEventListener("click", sendMessage);
 
 /**
- * Sends a message to the chat API and processes the response
+ * Sends a message to the security API and processes the response
  */
 async function sendMessage() {
   const message = userInput.value.trim();
 
-  // Don't send empty messages
   if (message === "" || isProcessing) return;
 
-  // Disable input while processing
   isProcessing = true;
   userInput.disabled = true;
   sendButton.disabled = true;
 
-  // Add user message to chat
   addMessageToChat("user", message);
 
-  // Clear input
   userInput.value = "";
   userInput.style.height = "auto";
 
-  // Show typing indicator
   typingIndicator.classList.add("visible");
 
-  // Add message to history
   chatHistory.push({ role: "user", content: message });
 
   try {
-    // Create new assistant response element
     const assistantMessageEl = document.createElement("div");
     assistantMessageEl.className = "message assistant-message";
     assistantMessageEl.innerHTML = "<p></p>";
     chatMessages.appendChild(assistantMessageEl);
 
-    // Scroll to bottom
     chatMessages.scrollTop = chatMessages.scrollHeight;
 
-    // Send request to API
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: {
@@ -85,12 +75,10 @@ async function sendMessage() {
       }),
     });
 
-    // Handle errors
     if (!response.ok) {
       throw new Error("Failed to get response");
     }
 
-    // Process streaming response
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let responseText = "";
@@ -102,20 +90,16 @@ async function sendMessage() {
         break;
       }
 
-      // Decode chunk
       const chunk = decoder.decode(value, { stream: true });
 
-      // Process SSE format
       const lines = chunk.split("\n");
       for (const line of lines) {
         try {
           const jsonData = JSON.parse(line);
           if (jsonData.response) {
-            // Append new content to existing text
             responseText += jsonData.response;
             assistantMessageEl.querySelector("p").textContent = responseText;
 
-            // Scroll to bottom
             chatMessages.scrollTop = chatMessages.scrollHeight;
           }
         } catch (e) {
@@ -124,19 +108,16 @@ async function sendMessage() {
       }
     }
 
-    // Add completed response to chat history
     chatHistory.push({ role: "assistant", content: responseText });
   } catch (error) {
     console.error("Error:", error);
     addMessageToChat(
       "assistant",
-      "Sorry, there was an error processing your request.",
+      "Security analysis failed. Please check your connection and try again.",
     );
   } finally {
-    // Hide typing indicator
     typingIndicator.classList.remove("visible");
 
-    // Re-enable input
     isProcessing = false;
     userInput.disabled = false;
     sendButton.disabled = false;
@@ -153,6 +134,5 @@ function addMessageToChat(role, content) {
   messageEl.innerHTML = `<p>${content}</p>`;
   chatMessages.appendChild(messageEl);
 
-  // Scroll to bottom
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
