@@ -15,7 +15,8 @@ const typingIndicator = document.getElementById("typing-indicator");
 let chatHistory = [
   {
     role: "assistant",
-    content: "Halo! Laura adalah asisten AI cerdas dari SOEPARNO ENTERPRISE Corp. Laura beroperasi dari Sukabumi City, West Java - INDONESIA. Bagaimana Laura bisa membantu Anda hari ini?"
+    content: "Hai! saya Anna Laura, asisten AI cerdas yang bisa jadi teman ngobrol dan pendengar setia keluh kesahmu seharian? Jadi jangan ragu untuk sekedar curhat atau untuk menanyakan hal apapun.</p>
+          "
   },
 ];
 let isProcessing = false;
