@@ -51,205 +51,243 @@ export default {
   ): Promise<Response> {
     const url = new URL(request.url);
 
+    // Serve UI
     if (url.pathname === "/" || !url.pathname.startsWith("/api/")) {
       return env.ASSETS.fetch(request);
     }
 
-    if (url.pathname === "/api/chat") {
-      if (request.method === "POST") {
-        return handleChatRequest(request, env);
-      }
-      return new Response("Method not allowed", { status: 405 });
+    // Chat endpoint
+    if (url.pathname === "/api/chat" && request.method === "POST") {
+      return handleChatRequest(request, env);
+    }
+
+    // News API endpoint
+    if (url.pathname === "/api/news" && request.method === "POST") {
+      return handleNewsRequest(request, env);
     }
 
     return new Response("Not found", { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
 
-/**
- * Content filter untuk mencegah spam dan explicit content
- */
+/* ============================================================
+   FILTER
+============================================================ */
 function contentFilter(message: string): boolean {
   return !SPAM_PATTERNS.some(pattern => pattern.test(message));
 }
 
-/**
- * Generate session ID untuk anonymous user
- */
+/* ============================================================
+   SESSION ID
+============================================================ */
 function generateSessionId(): string {
   return `sess_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
-/**
- * Rate limiting check
- */
+/* ============================================================
+   RATE LIMIT
+============================================================ */
 function checkRateLimit(sessionData: any): boolean {
   const now = Date.now();
   const oneMinuteAgo = now - 60000;
-  
-  // Max 10 messages per minute
-  if (sessionData.lastActivity > oneMinuteAgo && sessionData.messageCount > 10) {
-    return false;
-  }
-  
-  // Max 1000 messages per session (1MB limit)
-  if (sessionData.messageCount > 1000) {
-    return false;
-  }
-  
+
+  if (sessionData.lastActivity > oneMinuteAgo && sessionData.messageCount > 10) return false;
+  if (sessionData.messageCount > 1000) return false;
+
   return true;
 }
 
-/**
- * Load chat session dari R2
- */
+/* ============================================================
+   LOAD / SAVE SESSION (R2)
+============================================================ */
 async function loadChatSession(sessionId: string, env: Env): Promise<ChatSession | null> {
   try {
     const sessionData = await env.ANNA_LAURA_BASIC.get(sessionId);
-    if (sessionData) {
-      return JSON.parse(await sessionData.text());
-    }
-  } catch (error) {
-    console.error("Error loading session:", error);
+    if (sessionData) return JSON.parse(await sessionData.text());
+  } catch (e) {
+    console.error("Error loading session:", e);
   }
   return null;
 }
 
-/**
- * Save chat session ke R2
- */
 async function saveChatSession(sessionId: string, sessionData: ChatSession, env: Env): Promise<void> {
   try {
     await env.ANNA_LAURA_BASIC.put(
       sessionId,
       JSON.stringify(sessionData),
-      { expirationTtl: 86400 } // 24 jam
+      { expirationTtl: 86400 }
     );
-  } catch (error) {
-    console.error("Error saving session:", error);
+  } catch (e) {
+    console.error("Error saving session:", e);
   }
 }
 
-async function handleChatRequest(
+/* ============================================================
+   NEWS API (Everything + Top Headlines)
+============================================================ */
+
+async function fetchNews(query: string, env: Env) {
+  const apiKey = env.LAURANEWS_API_KEY;
+
+  const everythingURL =
+    `https://newsapi.org/v2/everything?q=${encodeURIComponent(query)}&language=id&sortBy=publishedAt&pageSize=6&apiKey=${apiKey}`;
+
+  const headlinesURL =
+    `https://newsapi.org/v2/top-headlines?country=id&pageSize=6&apiKey=${apiKey}`;
+
+  const [everything, headlines] = await Promise.all([
+    fetch(everythingURL).then(r => r.json()),
+    fetch(headlinesURL).then(r => r.json())
+  ]);
+
+  const articles = [...(headlines.articles || []), ...(everything.articles || [])];
+
+  return formatNewsUltraRapi(articles);
+}
+
+// Format Ultra-Rapi (pilihan kamu)
+function formatNewsUltraRapi(articles: any[]) {
+  if (!articles.length) {
+    return "💡 Laura tidak menemukan berita untuk topik tersebut.";
+  }
+
+  let result = "📰 **Berita Terbaru untuk Kamu**\n\n";
+
+  articles.slice(0, 10).forEach((a, i) => {
+    result += `${i + 1}. **${a.title}**\n`;
+    if (a.description) result += `   - **Ringkasan:** ${a.description}\n`;
+    if (a.source?.name) result += `   - **Sumber:** ${a.source.name}\n`;
+    if (a.url) result += `   - **Link:** ${a.url}\n`;
+    result += `\n`;
+  });
+
+  return result;
+}
+
+/* ============================================================
+   HANDLE NEWS REQUEST
+============================================================ */
+async function handleNewsRequest(
   request: Request,
-  env: Env,
+  env: Env
 ): Promise<Response> {
   try {
-    const { messages = [], sessionId: clientSessionId } = await request.json() as {
-      messages: ChatMessage[];
-      sessionId?: string;
-    };
+    const { query } = await request.json();
 
-    // Generate atau gunakan session ID
+    if (!query || query.trim() === "") {
+      return new Response(JSON.stringify({ error: "Query kosong." }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const result = await fetchNews(query, env);
+
+    return new Response(JSON.stringify({ result }), {
+      headers: { "Content-Type": "application/json" }
+    });
+  } catch (err) {
+    console.error(err);
+    return new Response(JSON.stringify({ error: "Gagal memproses request berita." }), {
+      status: 500
+    });
+  }
+}
+
+/* ============================================================
+   HANDLE CHAT REQUEST
+============================================================ */
+async function handleChatRequest(request: Request, env: Env): Promise<Response> {
+  try {
+    const { messages = [], sessionId: clientSessionId } = await request.json();
+
     const sessionId = clientSessionId || generateSessionId();
-    
-    // Load existing session atau create baru
+
     let sessionData = await loadChatSession(sessionId, env) || {
       chatHistory: [],
       sessionStart: Date.now(),
       messageCount: 0,
       lastActivity: Date.now(),
-      sessionId: sessionId
+      sessionId
     };
 
-    // Check rate limiting
     if (!checkRateLimit(sessionData)) {
       return new Response(
-        JSON.stringify({ 
-          error: "Rate limit exceeded. Please try again later.",
-          sessionId 
-        }),
-        { status: 429, headers: { 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: "Rate limit exceeded.", sessionId }),
+        { status: 429 }
       );
     }
 
-    // Filter spam content
     const lastUserMessage = messages[messages.length - 1];
-    if (lastUserMessage.role === 'user' && !contentFilter(lastUserMessage.content)) {
+    if (lastUserMessage.role === "user" && !contentFilter(lastUserMessage.content)) {
       return new Response(
-        JSON.stringify({ 
-          error: "Content not allowed.",
-          sessionId 
-        }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: "Content not allowed.", sessionId }),
+        { status: 400 }
       );
     }
 
-    // Combine session history dengan new messages
     const allMessages = [...sessionData.chatHistory, ...messages];
-    
-    // Add system prompt jika belum ada
-    if (!allMessages.some((msg) => msg.role === "system")) {
+
+    if (!allMessages.some(msg => msg.role === "system")) {
       allMessages.unshift({ role: "system", content: SYSTEM_PROMPT });
     }
 
-    // Process messages untuk Laura persona
     const processedMessages = allMessages.map(msg => {
       if (msg.role === "assistant") {
-        return {
-          ...msg,
-          content: msg.content.replace(/saya|aku/gi, 'Laura')
-        };
+        return { ...msg, content: msg.content.replace(/saya|aku/gi, "Laura") };
       }
       return msg;
     });
 
-    const response = await env.AI.run(
-      MODEL_ID,
-      {
-        messages: processedMessages,
-        max_tokens: 2048,
-        stream: true
-      }
-    );
+    // AI Streaming
+    const aiResponse = await env.AI.run(MODEL_ID, {
+      messages: processedMessages,
+      max_tokens: 2048,
+      stream: true
+    });
 
-    // Update session data
-    sessionData.chatHistory = allMessages.slice(-50); // Keep last 50 messages
-    sessionData.messageCount += 1;
+    sessionData.chatHistory = allMessages.slice(-50);
+    sessionData.messageCount++;
     sessionData.lastActivity = Date.now();
 
-    // Save session ke R2
     await saveChatSession(sessionId, sessionData, env);
 
-    // Return streaming response dengan session ID
-    const originalStream = response as ReadableStream;
+    const originalStream = aiResponse as ReadableStream;
     const transformedStream = new ReadableStream({
       async start(controller) {
         const reader = originalStream.getReader();
         const encoder = new TextEncoder();
-        
-        // Send session ID first
+
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ sessionId })}\n\n`));
-        
+
         try {
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
 
             const chunk = new TextDecoder().decode(value);
-            const lines = chunk.split('\n');
-            
+            const lines = chunk.split("\n");
+
             for (const line of lines) {
-              if (line.startsWith('data: ')) {
+              if (line.startsWith("data: ")) {
                 try {
                   const data = JSON.parse(line.slice(6));
                   if (data.response) {
-                    const lauraResponse = data.response.replace(/saya|aku/gi, 'Laura');
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ response: lauraResponse })}\n\n`));
+                    const lauraText = data.response.replace(/saya|aku/gi, "Laura");
+                    controller.enqueue(
+                      encoder.encode(`data: ${JSON.stringify({ response: lauraText })}\n\n`)
+                    );
                   }
-                } catch (e) {
-                  // Skip invalid JSON
-                }
+                } catch {}
               }
             }
           }
           controller.close();
-        } catch (error) {
-          console.error('Stream error:', error);
-          const errorMsg = JSON.stringify({
-            response: "Laura minta maaf, terjadi gangguan pada sistem."
-          });
-          controller.enqueue(encoder.encode(`data: ${errorMsg}\n\n`));
+        } catch (e) {
+          console.error("Stream error:", e);
+          controller.enqueue(
+            new TextEncoder().encode(`data: ${JSON.stringify({ response: "Laura mengalami gangguan." })}\n\n`)
+          );
           controller.close();
         }
       }
@@ -257,23 +295,17 @@ async function handleChatRequest(
 
     return new Response(transformedStream, {
       headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive"
+      }
     });
 
-  } catch (error) {
-    console.error("Error processing chat request:", error);
-    
+  } catch (err) {
+    console.error("Chat error:", err);
     return new Response(
-      JSON.stringify({ 
-        error: "Maaf, Laura mengalami gangguan teknis. Silakan coba lagi dalam beberapa saat."
-      }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      }
+      JSON.stringify({ error: "Laura mengalami gangguan teknis." }),
+      { status: 500 }
     );
   }
 }
