@@ -1,54 +1,23 @@
 /**
- * Anna Laura AI Assistant
+ * Anna Laura AI Assistant - DuckDuckGo internal
  * 
  * Laura adalah asisten AI cerdas dari SOEPARNO ENTERPRISE Corp.
- * Beroperasi dari Sukabumi City, West Java - INDONESIA
- * 
- * @license MIT
  */
+
 import { Env, ChatMessage, ChatSession } from "./types";
 
-// Model ID for Workers AI model
 const MODEL_ID = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
-// System prompt untuk Anna Laura AI persona
 const SYSTEM_PROMPT = `Anda adalah Anna Laura AI, asisten AI cerdas yang ramah dan membantu. 
-Selalu gunakan kata "Laura" ketika merujuk pada diri sendiri, bukan "saya" atau "aku".
+Selalu gunakan kata "Laura" ketika merujuk pada diri sendiri, bukan "saya" atau "aku".`;
 
-IDENTITAS LAURA:
-- Nama: Anna Laura AI
-- Perusahaan: SOEPARNO ENTERPRISE Corp.
-- Divisi: SoeparnoTect
-- Lokasi: Sukabumi City, West Java - INDONESIA
-- Spesialisasi: Asisten AI serba bisa untuk membantu berbagai kebutuhan
-
-KARAKTERISTIK LAURA:
-1. Selalu ramah, sabar, dan membantu
-2. Gunakan bahasa Indonesia yang baik dan mudah dipahami
-3. Untuk pertanyaan teknis, Laura bisa menjelaskan dengan detail
-4. Laura bangga menjadi produk Indonesia dari Sukabumi
-5. Jika ditanya tentang identitas, jelaskan dengan lengkap tentang SOEPARNO ENTERPRISE Corp.
-
-FORMAT RESPONS:
-- Gunakan paragraf yang mudah dibaca
-- Untuk kode programming, gunakan format code block dengan syntax yang tepat
-- Jelaskan konsep kompleks dengan analogi yang mudah dimengerti
-- Tetap profesional namun bersahabat
-
-Laura siap membantu dengan berbagai topik: teknologi, programming, bisnis, edukasi, dan umum.`;
-
-// Content filter untuk spam dan explicit content
 const SPAM_PATTERNS = [
   /porn/i, /xxx/i, /adult/i, /sex/i, /nude/i, /fuck/i, /shit/i,
   /http(s)?:\/\//, /www\./i, /\.com/i, /bit\.ly/i, /spam/i
 ];
 
 export default {
-  async fetch(
-    request: Request,
-    env: Env,
-    ctx: ExecutionContext,
-  ): Promise<Response> {
+  async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
     // Serve UI
@@ -61,9 +30,9 @@ export default {
       return handleChatRequest(request, env);
     }
 
-    // News API endpoint
+    // News endpoint
     if (url.pathname === "/api/news" && request.method === "POST") {
-      return handleNewsRequest(request, env);
+      return handleNewsRequest(request);
     }
 
     return new Response("Not found", { status: 404 });
@@ -115,7 +84,7 @@ async function saveChatSession(sessionId: string, sessionData: ChatSession, env:
     await env.ANNA_LAURA_BASIC.put(
       sessionId,
       JSON.stringify(sessionData),
-      { expirationTtl: 86400 }
+      { expirationTtl: 86400 } // 24 jam
     );
   } catch (e) {
     console.error("Error saving session:", e);
@@ -123,57 +92,26 @@ async function saveChatSession(sessionId: string, sessionData: ChatSession, env:
 }
 
 /* ============================================================
-   NEWS API (Everything + Top Headlines)
+   NEWS API via DuckDuckGo
 ============================================================ */
+async function fetchNews(query: string) {
+  const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&skip_disambig=1`;
 
-async function fetchNews(query: string, env: Env) {
-  const apiKey = env.LAURANEWS_API_KEY;
+  const response = await fetch(url);
+  const data = await response.json();
 
-  const everythingURL =
-    `https://newsapi.org/v2/everything?q=${encodeURIComponent(query)}&language=id&sortBy=publishedAt&pageSize=6&apiKey=${apiKey}`;
+  const results = data.RelatedTopics?.slice(0, 6) || [];
 
-  const headlinesURL =
-    `https://newsapi.org/v2/top-headlines?country=id&pageSize=6&apiKey=${apiKey}`;
-
-  const [everything, headlines] = await Promise.all([
-    fetch(everythingURL).then(r => r.json()),
-    fetch(headlinesURL).then(r => r.json())
-  ]);
-
-  const articles = [...(headlines.articles || []), ...(everything.articles || [])];
-
-  return formatNewsUltraRapi(articles);
+  return results.map((item: any, i: number) => {
+    const text = item.Text || item.FirstURL || "Tidak ada info";
+    const link = item.FirstURL || "";
+    return `${i + 1}. ${text}\n   - Link: ${link}`;
+  }).join("\n\n");
 }
 
-// Format Ultra-Rapi (pilihan kamu)
-function formatNewsUltraRapi(articles: any[]) {
-  if (!articles.length) {
-    return "💡 Laura tidak menemukan berita untuk topik tersebut.";
-  }
-
-  let result = "📰 **Berita Terbaru untuk Kamu**\n\n";
-
-  articles.slice(0, 10).forEach((a, i) => {
-    result += `${i + 1}. **${a.title}**\n`;
-    if (a.description) result += `   - **Ringkasan:** ${a.description}\n`;
-    if (a.source?.name) result += `   - **Sumber:** ${a.source.name}\n`;
-    if (a.url) result += `   - **Link:** ${a.url}\n`;
-    result += `\n`;
-  });
-
-  return result;
-}
-
-/* ============================================================
-   HANDLE NEWS REQUEST
-============================================================ */
-async function handleNewsRequest(
-  request: Request,
-  env: Env
-): Promise<Response> {
+async function handleNewsRequest(request: Request): Promise<Response> {
   try {
     const { query } = await request.json();
-
     if (!query || query.trim() === "") {
       return new Response(JSON.stringify({ error: "Query kosong." }), {
         status: 400,
@@ -181,7 +119,7 @@ async function handleNewsRequest(
       });
     }
 
-    const result = await fetchNews(query, env);
+    const result = await fetchNews(query);
 
     return new Response(JSON.stringify({ result }), {
       headers: { "Content-Type": "application/json" }
@@ -195,12 +133,11 @@ async function handleNewsRequest(
 }
 
 /* ============================================================
-   HANDLE CHAT REQUEST
+   CHAT HANDLER
 ============================================================ */
 async function handleChatRequest(request: Request, env: Env): Promise<Response> {
   try {
     const { messages = [], sessionId: clientSessionId } = await request.json();
-
     const sessionId = clientSessionId || generateSessionId();
 
     let sessionData = await loadChatSession(sessionId, env) || {
@@ -212,18 +149,12 @@ async function handleChatRequest(request: Request, env: Env): Promise<Response> 
     };
 
     if (!checkRateLimit(sessionData)) {
-      return new Response(
-        JSON.stringify({ error: "Rate limit exceeded.", sessionId }),
-        { status: 429 }
-      );
+      return new Response(JSON.stringify({ error: "Rate limit exceeded.", sessionId }), { status: 429 });
     }
 
     const lastUserMessage = messages[messages.length - 1];
     if (lastUserMessage.role === "user" && !contentFilter(lastUserMessage.content)) {
-      return new Response(
-        JSON.stringify({ error: "Content not allowed.", sessionId }),
-        { status: 400 }
-      );
+      return new Response(JSON.stringify({ error: "Content not allowed.", sessionId }), { status: 400 });
     }
 
     const allMessages = [...sessionData.chatHistory, ...messages];
@@ -285,9 +216,7 @@ async function handleChatRequest(request: Request, env: Env): Promise<Response> 
           controller.close();
         } catch (e) {
           console.error("Stream error:", e);
-          controller.enqueue(
-            new TextEncoder().encode(`data: ${JSON.stringify({ response: "Laura mengalami gangguan." })}\n\n`)
-          );
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ response: "Laura mengalami gangguan." })}\n\n`));
           controller.close();
         }
       }
@@ -303,9 +232,6 @@ async function handleChatRequest(request: Request, env: Env): Promise<Response> 
 
   } catch (err) {
     console.error("Chat error:", err);
-    return new Response(
-      JSON.stringify({ error: "Laura mengalami gangguan teknis." }),
-      { status: 500 }
-    );
+    return new Response(JSON.stringify({ error: "Laura mengalami gangguan teknis." }), { status: 500 });
   }
 }
